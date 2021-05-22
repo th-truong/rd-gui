@@ -1,0 +1,7 @@
+PyQt5==5.15.4
+confuse==1.4.0
+pandas==1.2.4
+pathlib==1.0.1
+imageio==2.9.0
+opencv-python==4.5.2.52
+matplotlib==3.4.2
