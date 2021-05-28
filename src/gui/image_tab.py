@@ -8,6 +8,7 @@ from PyQt5.QtCore import QAbstractTableModel, Qt
 
 import pandas as pd
 from scripts import load_model
+import copy
 
 
 QT_IMG_FORMATS = "All files (*.*);;BMP (*.bmp);;CUR (*.cur);;GIF (*.gif);;ICNS (*.icns);;ICO (*.ico);;JPEG (*.jpeg);;JPG (*.jpg);;PBM (*.pbm);;PGM (*.pgm);;PNG (*.png);;PPM (*.ppm);;SVG (*.svg);;SVGZ (*.svgz);;TGA (*.tga);;TIF (*.tif);;TIFF (*.tiff);;WBMP (*.wbmp);;WEBP (*.webp);;XBM (*.xbm);;XPM (*.xpm)"
@@ -33,11 +34,11 @@ MODEL_CLASSES = ['background',
                  'tanktop',
                  'tie',
                  'trousers']
-obj_df = pd.DataFrame({'Object': ['man_0', 'chair_0', 'apple_0'],
-                   'Confidence': [0.99, 0.54, 0.42]})
-relations_df = pd.DataFrame({'Relationship': ['man_0 holds apple_0', 'man_0 sits on chair_0',
-                                              'man_0 eats apple_0'],
-                   'Confidence': [0.99, 0.54, 0.42]})
+
+obj_df = pd.DataFrame({'Object': [],
+                   'Confidence': []})
+relations_df = pd.DataFrame({'Relationship': [],
+                   'Confidence': []})
 
 
 class ImageTab(QWidget):
@@ -77,14 +78,25 @@ class ImageTab(QWidget):
         fname = QFileDialog.getOpenFileName(self, 'Open file',
                                             self.cfg['imgs_folder'].get(),
                                             QT_IMG_FORMATS)
-        fname = Path(str(fname[0]))
-        self.pgn_file_txt.setText(str(fname))
+        if fname[0] != "":
+            fname = Path(str(fname[0]))
+            self.pgn_file_txt.setText(str(fname))
 
-        if Path(self.pgn_file_txt.text()).exists():
-            img = process_img(fname, self.model, self.device)
-            Qimg_obj = QImage(img, img.shape[1], img.shape[0],
-                              QImage.Format_RGB888)
-            self.img_widget.setPixmap(QPixmap(Qimg_obj).scaled(1280, 720, aspectRatioMode=1))
+            if Path(self.pgn_file_txt.text()).exists():
+                img, boxes, og_img = process_img(fname, self.model, self.device)
+                self.og_img = og_img
+                self.results_tables.boxes = boxes
+                self.update_display_img(img)
+                self.update_detections_tables(boxes)
+
+    def update_display_img(self, img):
+        Qimg_obj = QImage(img, img.shape[1], img.shape[0],
+                          QImage.Format_RGB888)
+        self.img_widget.setPixmap(QPixmap(Qimg_obj).scaled(1280, 720, aspectRatioMode=1))
+
+    def update_detections_tables(self, boxes):
+        self.results_tables.objects_table.update_data(boxes.boxes_as_df())
+        self.results_tables.relations_table.update_data(boxes.relations_as_df())
 
 
 class ResultsTab(QWidget):
@@ -92,14 +104,19 @@ class ResultsTab(QWidget):
         super(QWidget, self).__init__(parent)
 
         self.tabs = QTabWidget()
+        self.parent = parent
+
+        self.boxes = []
 
         self.objects_table = PandasQTableModel(obj_df)
         self.objects_view = QTableView()
         self.objects_view.setModel(self.objects_table)
+        self.objects_view.clicked.connect(self.object_clicked)
 
         self.relations_table = PandasQTableModel(relations_df)
         self.relations_view = QTableView()
         self.relations_view.setModel(self.relations_table)
+        self.relations_view.clicked.connect(self.relation_clicked)
 
         self.tabs.addTab(self.objects_view, "Objects")
         self.tabs.addTab(self.relations_view, "Relations")
@@ -107,6 +124,30 @@ class ResultsTab(QWidget):
         layout = QGridLayout(self)
         layout.addWidget(self.tabs)
         self.setLayout(layout)
+
+    def relation_clicked(self, item):
+        idx = item.row()
+        chosen_row = self.boxes.relations[idx]
+        person_box = self.boxes[chosen_row['person_id']]
+        obj_box = self.boxes[chosen_row['obj_id']]
+        boxes = person_box + obj_box
+        # TODO: do this better, don't make a deep copy...
+        new_boxes = copy.deepcopy(self.boxes)
+        new_boxes.detections = boxes
+
+        img = self.parent.og_img
+        self.parent.update_display_img(draw_boxes(img, new_boxes, threshold=0.))
+
+    def object_clicked(self, item):
+        idx = item.row()
+        chosen_row = self.boxes[int(idx)]
+        print(chosen_row)
+        # TODO: do this better, don't make a deep copy...
+        new_boxes = copy.deepcopy(self.boxes)
+        new_boxes.detections = chosen_row
+
+        img = self.parent.og_img
+        self.parent.update_display_img(draw_boxes(img, new_boxes, threshold=0.))
 
 
 class PandasQTableModel(QAbstractTableModel):
@@ -146,7 +187,7 @@ import matplotlib.cm
 # TODO: clean this up and move it somewhere else
 
 class BoxDetections():
-    def __init__(self, boxes, width=None, height=None):
+    def __init__(self, boxes, relations, width=None, height=None):
         """[summary]
 
         Args:
@@ -155,14 +196,29 @@ class BoxDetections():
             height ([type], optional): [description]. Defaults to None.
         """
         self.detections = boxes
+        self.relations = relations
         self.width = width
         self.height = height
+
+    def boxes_as_df(self):
+        scores = [x['score'] for x in self.detections]
+        labels = [x['id'] for x in self.detections]
+        return pd.DataFrame({'Object': labels,
+                             'Confidence': scores})
+
+    def relations_as_df(self):
+        scores = [x['score'] for x in self.relations]
+        relations = [x['person_id'] + " wears " + x['obj_id'] for x in self.relations]
+        return pd.DataFrame({'Relationship': relations,
+                             'Confidence': scores})
 
     def __len__(self):
         return len(self.detections)
 
     def __getitem__(self, key):
-        if isinstance(key, slice) or isinstance(key, int):
+        if isinstance(key, int):
+            return [self.detections[key]]
+        elif isinstance(key, slice):
             return self.detections[key]
         elif isinstance(key, str):
             if key in MODEL_CLASSES:
@@ -184,15 +240,16 @@ class BoxDetections():
     def load_model_out(cls, pred, width, height,
                        obj_categories=MODEL_CLASSES):
         boxes = []
-        pred = pred[0]
-        for i, score in enumerate(pred['scores']):
-            np_img = np.round(pred['masks'][i].cpu().detach().numpy().squeeze())
+        relations = []
+        pred_boxes = pred[0]
+        for i, score in enumerate(pred_boxes['scores']):
+            np_img = np.round(pred_boxes['masks'][i].cpu().detach().numpy().squeeze())
             rows = np.any(np_img, axis=1)
             cols = np.any(np_img, axis=0)
             ymin, ymax = np.where(rows)[0][[0, -1]]
             xmin, xmax = np.where(cols)[0][[0, -1]]
-            box = {'label': MODEL_CLASSES[pred['labels'][i]],
-                   'id': MODEL_CLASSES[pred['labels'][i]] + f"_{str(i)}",
+            box = {'label': obj_categories[pred_boxes['labels'][i]],
+                   'id': obj_categories[pred_boxes['labels'][i]] + f"_{str(i)}",
                    'score': score.cpu().detach().numpy().astype(float) / 1.,
                    'xmin': xmin / width,
                    'ymin': ymin / height,
@@ -200,8 +257,23 @@ class BoxDetections():
                    'ymax': ymax / height
                    }
             boxes.append(box)
-        return cls(boxes=boxes, width=width, height=height)
 
+        rel_scores = pred[1]
+        pairs = pred[2]
+
+        obj_ids = [x['id'] for x in boxes]
+
+        for i, pair in enumerate(pairs):
+            person = obj_ids[pair[0]]
+            obj = obj_ids[pair[1]]
+            vrb_score = rel_scores[i].cpu().detach().numpy().squeeze()
+
+            rel = {"person_id": person,
+                   "obj_id": obj,
+                   "score": vrb_score}
+            relations.append(rel)
+
+        return cls(boxes=boxes, relations=relations, width=width, height=height)
 
 def process_img(img_path, model, device):
     if not isinstance(img_path, Path):
@@ -210,6 +282,7 @@ def process_img(img_path, model, device):
     img = Image.open(img_path).convert("RGB")
     img = np.array(img)
     np_img = img.copy()
+    og_img = img.copy()
     img = F.to_tensor(img)
     img = img.to(device)
     height, width = np_img.shape[0:2]
@@ -224,7 +297,7 @@ def process_img(img_path, model, device):
 
     boxes = BoxDetections.load_model_out(out, width, height)
 
-    return draw_boxes(np_img, boxes)
+    return draw_boxes(np_img, boxes), boxes, og_img
 
 
 def draw_boxes(img, box_det, threshold=0.3, cmapping='tab20'):
