@@ -141,7 +141,6 @@ class ResultsTab(QWidget):
     def object_clicked(self, item):
         idx = item.row()
         chosen_row = self.boxes[int(idx)]
-        print(chosen_row)
         # TODO: do this better, don't make a deep copy...
         new_boxes = copy.deepcopy(self.boxes)
         new_boxes.detections = chosen_row
