@@ -14,7 +14,7 @@ import torchvision
 import math
 import numpy as np
 
-from vrb_model import rcnn
+from training.vrb_model import rcnn
 
 
 def trainable_params(model):

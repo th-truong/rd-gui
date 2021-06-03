@@ -1,4 +1,4 @@
-from vrb_model import vrb_training_model, rcnn
+from training.vrb_model import vrb_training_model, rcnn
 
 from collections import OrderedDict
 import warnings
