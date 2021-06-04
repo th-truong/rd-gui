@@ -7,8 +7,9 @@ from PyQt5.QtWidgets import (QFileDialog, QGridLayout, QLabel, QLineEdit,
 from PyQt5.QtCore import QAbstractTableModel, Qt
 
 import pandas as pd
-from scripts import load_model
 import copy
+
+from training.vrb_model import vrb_full_model
 
 
 QT_IMG_FORMATS = "All files (*.*);;BMP (*.bmp);;CUR (*.cur);;GIF (*.gif);;ICNS (*.icns);;ICO (*.ico);;JPEG (*.jpeg);;JPG (*.jpg);;PBM (*.pbm);;PGM (*.pgm);;PNG (*.png);;PPM (*.ppm);;SVG (*.svg);;SVGZ (*.svgz);;TGA (*.tga);;TIF (*.tif);;TIFF (*.tiff);;WBMP (*.wbmp);;WEBP (*.webp);;XBM (*.xbm);;XPM (*.xpm)"
@@ -39,6 +40,24 @@ obj_df = pd.DataFrame({'Object': [],
                    'Confidence': []})
 relations_df = pd.DataFrame({'Relationship': [],
                    'Confidence': []})
+
+
+def load_model(model_path):
+    if not isinstance(model_path, Path):
+        model_path = Path(model_path)
+
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    chkpt_full = torch.load(Path("pretrained_models/optimal_model/optimal_model.tar"))
+
+    model_mrcnn = vrb_full_model.create_mrcnn_model(num_classes=22)
+    model_vrb = vrb_full_model.create_full_vrb_model(num_classes=1, model_mrcnn=model_mrcnn)
+
+    model_vrb.load_state_dict(chkpt_full['model'])
+    model_vrb.eval()
+    model_vrb.to(device)
+
+    return model_vrb, device
 
 
 class ImageTab(QWidget):
