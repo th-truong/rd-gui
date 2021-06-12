@@ -37,9 +37,9 @@ MODEL_CLASSES = ['background',
                  'trousers']
 
 obj_df = pd.DataFrame({'Object': [],
-                   'Confidence': []})
+                       'Confidence': []})
 relations_df = pd.DataFrame({'Relationship': [],
-                   'Confidence': []})
+                             'Confidence': []})
 
 
 def load_model(model_path):
@@ -90,7 +90,6 @@ class ImageTab(QWidget):
         self.results_tables = ResultsTab(self)
         # self.engine_list.clicked.connect(self.engine_list_click)
         layout.addWidget(self.results_tables, 0, 8, 4, 7)
-
 
     def open_file_btn_click(self):
         # get file path
@@ -235,7 +234,7 @@ class BoxDetections():
 
     def __getitem__(self, key):
         if isinstance(key, int):
-            return [self.detections[key]]
+            return self.detections[key]
         elif isinstance(key, slice):
             return self.detections[key]
         elif isinstance(key, str):
