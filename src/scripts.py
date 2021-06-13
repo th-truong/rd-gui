@@ -64,10 +64,10 @@ def train_model(args, cfg):
                                            collate_fn=collate_fn)
 
     num_epochs = cfg['num_epochs'].get()
-
+    step_count = 0
     for epoch in range(num_epochs):
         print(f"Epoch {epoch}")
-        step_count = 0
+        
         for images, targets in tqdm(torch_ds):
             images = list(image.to(device) for image in images)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
