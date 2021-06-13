@@ -1,4 +1,6 @@
 import argparse
+import confuse
+from pathlib import Path
 from scripts import display_gui, train_model
 
 
@@ -20,4 +22,8 @@ if __name__ == "__main__":
     parser_train.add_argument('--cfg-path', default='cfgs/training_config.yml')
 
     args = parser.parse_args()
-    args.func(args)
+
+    cfg = confuse.Configuration('RD_GUI', __name__, read=False)
+    cfg.set_file(Path(args.cfg_path))
+
+    args.func(args, cfg)
