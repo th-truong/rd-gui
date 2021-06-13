@@ -1,1 +1,7 @@
 visual_genome_path: D:\datasets\visual_genome
+tensorboard_path: D:\paper_repos\rd-gui\tb_logs\resnet50_frcnn_fpn
+
+optimizer_kwargs:
+    lr: 0.001
+
+num_epochs: 100

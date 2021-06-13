@@ -6,21 +6,23 @@ from matplotlib import pyplot as plt
 import matplotlib.patches as mpatches
 from PIL import Image
 from torch.utils.data import Dataset
-import h5py
 import json
 import matplotlib.cm
+from torchvision.transforms import functional as F
+import torch
+import pickle
 
 
 class VTranseDataset(Dataset):
     def __init__(self, dataset_path: Path, ds_set="train"):
         super(VTranseDataset).__init__()
-        self.h5_file = h5py.File(dataset_path / "vg1_2_meta.h5")
-
         metadata_path = dataset_path / "metadata"
         self.ds_set = ds_set
         self._prepare_labels(metadata_path)
 
-        self.samples = self.h5_file['gt'][ds_set]
+        ds_set_path = dataset_path /  ("vtranse_" + ds_set + "_labels.pkl")
+        with open(ds_set_path, "rb") as f:
+            self.samples = pickle.load(f)
         self.dataset_path = dataset_path
 
     def view_sample(self, idx, rel_idx):
@@ -126,6 +128,25 @@ class VTranseObjDataset(VTranseDataset):
                 break
         title = f"Bounding Boxes for image {image_id}.jpg"
         plt.title(title)
+
+    def __getitem__(self, idx):
+        image_id = self.ds_idxs[idx]
+        sample = self.samples[image_id]
+
+        boxes_labels = self._get_unique_boxes(sample)
+
+        img = np.array(Image.open(self.dataset_path / "VG_100K" / (image_id + ".jpg")))
+        labels = boxes_labels[:, -1]
+        boxes = boxes_labels[:, 0:-1]
+
+        img = F.to_tensor(img)
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+        labels = torch.as_tensor(labels, dtype=torch.int64)
+
+        target = {'boxes': boxes,
+                  'labels': labels}
+
+        return img, target
 
     def _get_unique_boxes(self, sample):
 
