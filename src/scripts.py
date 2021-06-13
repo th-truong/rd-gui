@@ -79,7 +79,7 @@ def train_model(args, cfg):
             losses.backward()
             optimizer.step()
             for loss_key in out.keys():
-                writer.add_scalar(f'loss_key', out[loss_key], step_count)
+                writer.add_scalar(loss_key, out[loss_key], step_count)
             step_count += 1
 
         torch.save({
