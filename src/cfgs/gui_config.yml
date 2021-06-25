@@ -1,2 +1,11 @@
-imgs_folder: "D:\\paper_repos\\rd-gui\\src"
-model_path: "D:\\paper_repos\\rd-gui\\src\\pretrained_models\\optimal_model\\optimal_model.tar"
+imgs_folder: D:\paper_repos\rd-gui\src
+
+models:
+  relatable_clothing:
+    model_path: D:\paper_repos\rd-gui\src\pretrained_models\optimal_model\optimal_model.tar
+    classes: D:\paper_repos\rd-gui\src\pretrained_models\optimal_model\objects_list.json
+    relationships: D:\paper_repos\rd-gui\src\pretrained_models\optimal_model\pred_list.json
+  vtranse:
+    model_path: D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\039resnet50_fpn_frcnn_full.tar
+    classes:  D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\objects_list.json
+    relationships: D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\pred_list.json

@@ -14,9 +14,7 @@ from training.data_util.visual_genome_dataset import VGRelationsDataset
 from training.data_util.vtranse_dataset import VTranseDataset, VTranseObjDataset
 
 
-def display_gui(args):
-    cfg = confuse.Configuration('RD_GUI', __name__, read=False)
-    cfg.set_file(Path(args.cfg_path))
+def display_gui(args, cfg):
 
     app = QApplication(sys.argv)
 

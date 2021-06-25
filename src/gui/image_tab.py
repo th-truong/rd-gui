@@ -8,65 +8,63 @@ from PyQt5.QtCore import QAbstractTableModel, Qt
 
 import pandas as pd
 import copy
+import torch
+import json
+from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
 
 from training.vrb_model import vrb_full_model
+from gui.model_dataclasses import bounding_boxes
 
 
 QT_IMG_FORMATS = "All files (*.*);;BMP (*.bmp);;CUR (*.cur);;GIF (*.gif);;ICNS (*.icns);;ICO (*.ico);;JPEG (*.jpeg);;JPG (*.jpg);;PBM (*.pbm);;PGM (*.pgm);;PNG (*.png);;PPM (*.ppm);;SVG (*.svg);;SVGZ (*.svgz);;TGA (*.tga);;TIF (*.tif);;TIFF (*.tiff);;WBMP (*.wbmp);;WEBP (*.webp);;XBM (*.xbm);;XPM (*.xpm)"
-MODEL_CLASSES = ['background',
-                 'backpack',
-                 'belt',
-                 'dress',
-                 'female',
-                 'glove',
-                 'hat',
-                 'jeans',
-                 'male',
-                 'outerwear',
-                 'scarf',
-                 'shirt',
-                 'shoe',
-                 'shorts',
-                 'skirt',
-                 'sock',
-                 'suit',
-                 'swim_cap',
-                 'swim_wear',
-                 'tanktop',
-                 'tie',
-                 'trousers']
-
-obj_df = pd.DataFrame({'Object': [],
-                       'Confidence': []})
-relations_df = pd.DataFrame({'Relationship': [],
-                             'Confidence': []})
 
 
-def load_model(model_path):
-    if not isinstance(model_path, Path):
-        model_path = Path(model_path)
-
+def load_model(models_info, name):
+    model_path = models_info[name]['model_path']
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    if name == "relatable_clothing":
+        if not isinstance(model_path, Path):
+            model_path = Path(model_path)
 
-    chkpt_full = torch.load(Path("pretrained_models/optimal_model/optimal_model.tar"))
+        chkpt_full = torch.load(Path("pretrained_models/optimal_model/optimal_model.tar"))
 
-    model_mrcnn = vrb_full_model.create_mrcnn_model(num_classes=22)
-    model_vrb = vrb_full_model.create_full_vrb_model(num_classes=1, model_mrcnn=model_mrcnn)
+        model_mrcnn = vrb_full_model.create_mrcnn_model(num_classes=22)
+        model = vrb_full_model.create_full_vrb_model(num_classes=1, model_mrcnn=model_mrcnn)
 
-    model_vrb.load_state_dict(chkpt_full['model'])
-    model_vrb.eval()
-    model_vrb.to(device)
+        model.load_state_dict(chkpt_full['model'])
+        model.eval()
+        model.to(device)
+    elif name == "vtranse":
+        model = fasterrcnn_resnet50_fpn(pretrained_backbone=True, num_classes=201,
+                                        trainable_backbone_layers=5)
+        model_dict = torch.load(models_info[name]['model_path'])
+        model.load_state_dict(model_dict['model'])
+        model.eval()
+        model.to(device)
 
-    return model_vrb, device
+    return model
+
+
+def load_label_json(json_path):
+    with open(json_path, 'r') as f:
+        labels = json.load(f)
+    return labels
 
 
 class ImageTab(QWidget):
     def __init__(self, parent, cfg):
         super(QWidget, self).__init__(parent)
         self.cfg = cfg
-        model_vrb, device = load_model(cfg['model_path'].get())
-        self.model = model_vrb
-        self.device = device
+
+        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        models_info = cfg['models'].get()
+        self.models = [{'name': name,
+                        'model': load_model(models_info, name),
+                        'classes': load_label_json(models_info[name]['classes']),
+                        'relationships': load_label_json(models_info[name]['relationships'])
+                        } for name in models_info.keys()]
+        self.model = self.models[0]
+
         layout = QGridLayout(self)
         self.setLayout(layout)
 
@@ -91,6 +89,13 @@ class ImageTab(QWidget):
         # self.engine_list.clicked.connect(self.engine_list_click)
         layout.addWidget(self.results_tables, 0, 8, 4, 7)
 
+        # listbox for models
+        self.model_listbox = QListWidget()
+        self.model_listbox.clicked.connect(self.model_list_click)
+        layout.addWidget(self.model_listbox, 4, 8, 4, 7)
+        for i, model in enumerate(self.models):
+            self.model_listbox.insertItem(i, model['name'])
+
     def open_file_btn_click(self):
         # get file path
         fname = QFileDialog.getOpenFileName(self, 'Open file',
@@ -101,11 +106,15 @@ class ImageTab(QWidget):
             self.pgn_file_txt.setText(str(fname))
 
             if Path(self.pgn_file_txt.text()).exists():
-                img, boxes, og_img = process_img(fname, self.model, self.device)
+                img, boxes, og_img = bounding_boxes.process_img(fname, self.model, self.device)
                 self.og_img = og_img
                 self.results_tables.boxes = boxes
                 self.update_display_img(img)
                 self.update_detections_tables(boxes)
+
+    def model_list_click(self):
+        # set game as current selected game from list and display it
+        self.model = self.models[self.model_listbox.currentRow()]
 
     def update_display_img(self, img):
         Qimg_obj = QImage(img, img.shape[1], img.shape[0],
@@ -123,6 +132,11 @@ class ResultsTab(QWidget):
 
         self.tabs = QTabWidget()
         self.parent = parent
+
+        obj_df = pd.DataFrame({'Object': [],
+                               'Confidence': []})
+        relations_df = pd.DataFrame({'Relationship': [],
+                                     'Confidence': []})
 
         self.boxes = []
 
@@ -154,17 +168,17 @@ class ResultsTab(QWidget):
         new_boxes.detections = boxes
 
         img = self.parent.og_img
-        self.parent.update_display_img(draw_boxes(img, new_boxes, threshold=0.))
+        self.parent.update_display_img(bounding_boxes.draw_boxes(img, new_boxes, threshold=0.))
 
     def object_clicked(self, item):
         idx = item.row()
         chosen_row = self.boxes[int(idx)]
         # TODO: do this better, don't make a deep copy...
         new_boxes = copy.deepcopy(self.boxes)
-        new_boxes.detections = chosen_row
+        new_boxes.detections = [chosen_row]
 
         img = self.parent.og_img
-        self.parent.update_display_img(draw_boxes(img, new_boxes, threshold=0.))
+        self.parent.update_display_img(bounding_boxes.draw_boxes(img, new_boxes, threshold=0.))
 
 
 class PandasQTableModel(QAbstractTableModel):
@@ -193,152 +207,3 @@ class PandasQTableModel(QAbstractTableModel):
     def update_data(self, data):
         self._data = data
         self.layoutChanged.emit()
-
-
-from PIL import Image
-import numpy as np
-import torch
-from torchvision.transforms import functional as F
-import cv2
-import matplotlib.cm
-# TODO: clean this up and move it somewhere else
-
-class BoxDetections():
-    def __init__(self, boxes, relations, width=None, height=None):
-        """[summary]
-
-        Args:
-            boxes ([type]): [description]
-            width ([type], optional): [description]. Defaults to None.
-            height ([type], optional): [description]. Defaults to None.
-        """
-        self.detections = boxes
-        self.relations = relations
-        self.width = width
-        self.height = height
-
-    def boxes_as_df(self):
-        scores = [x['score'] for x in self.detections]
-        labels = [x['id'] for x in self.detections]
-        return pd.DataFrame({'Object': labels,
-                             'Confidence': scores})
-
-    def relations_as_df(self):
-        scores = [x['score'] for x in self.relations]
-        relations = [x['person_id'] + " wears " + x['obj_id'] for x in self.relations]
-        return pd.DataFrame({'Relationship': relations,
-                             'Confidence': scores})
-
-    def __len__(self):
-        return len(self.detections)
-
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self.detections[key]
-        elif isinstance(key, slice):
-            return self.detections[key]
-        elif isinstance(key, str):
-            if key in MODEL_CLASSES:
-                return [x for x in self.detections if x['label'] == key]
-            else:
-                return [x for x in self.detections if x['id'] == key]
-        elif isinstance(key, float):
-            return [x for x in self.detections if x['score'] > key]
-        else:
-            raise KeyError("The key must be one of type slice, int, str, or float.")
-
-    def __repr__(self):
-        return (f"{self.__class__.__name__}("
-                f"self.detections: {self.detections}, \
-                self.width: {repr(self.width)}, \
-                self.height: {repr(self.height)})")
-
-    @classmethod
-    def load_model_out(cls, pred, width, height,
-                       obj_categories=MODEL_CLASSES):
-        boxes = []
-        relations = []
-        pred_boxes = pred[0]
-        for i, score in enumerate(pred_boxes['scores']):
-            np_img = np.round(pred_boxes['masks'][i].cpu().detach().numpy().squeeze())
-            rows = np.any(np_img, axis=1)
-            cols = np.any(np_img, axis=0)
-            ymin, ymax = np.where(rows)[0][[0, -1]]
-            xmin, xmax = np.where(cols)[0][[0, -1]]
-            box = {'label': obj_categories[pred_boxes['labels'][i]],
-                   'id': obj_categories[pred_boxes['labels'][i]] + f"_{str(i)}",
-                   'score': score.cpu().detach().numpy().astype(float) / 1.,
-                   'xmin': xmin / width,
-                   'ymin': ymin / height,
-                   'xmax': xmax / width,
-                   'ymax': ymax / height
-                   }
-            boxes.append(box)
-
-        rel_scores = pred[1]
-        pairs = pred[2]
-
-        obj_ids = [x['id'] for x in boxes]
-
-        for i, pair in enumerate(pairs):
-            person = obj_ids[pair[0]]
-            obj = obj_ids[pair[1]]
-            vrb_score = rel_scores[i].cpu().detach().numpy().squeeze()
-
-            rel = {"person_id": person,
-                   "obj_id": obj,
-                   "score": vrb_score}
-            relations.append(rel)
-
-        return cls(boxes=boxes, relations=relations, width=width, height=height)
-
-def process_img(img_path, model, device):
-    if not isinstance(img_path, Path):
-        img_path = Path(img_path)
-
-    img = Image.open(img_path).convert("RGB")
-    img = np.array(img)
-    np_img = img.copy()
-    og_img = img.copy()
-    img = F.to_tensor(img)
-    img = img.to(device)
-    height, width = np_img.shape[0:2]
-
-    model.eval()
-    model.to(device)
-    with torch.no_grad():
-        out = model([img])
-    labels = out[0]['labels']
-    scores = out[0]['scores']
-    masks = out[0]['masks']
-
-    boxes = BoxDetections.load_model_out(out, width, height)
-
-    return draw_boxes(np_img, boxes), boxes, og_img
-
-
-def draw_boxes(img, box_det, threshold=0.3, cmapping='tab20'):
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    cmap = matplotlib.cm.get_cmap(cmapping)
-    thickness = int(np.min([box_det.width/150, box_det.height/150]))
-
-    total_objects = len(box_det[threshold])
-
-    for i, box in enumerate(box_det[threshold]):
-        box_mask = np.zeros_like(img)
-
-        top_left = (int(box['xmin']*box_det.width), int(box['ymin']*box_det.height))
-        bottom_right = (int(box['xmax']*box_det.width), int(box['ymax']*box_det.height))
-
-        color = np.array(cmap(i / total_objects)) * 255.0
-        color = color[::-1]  # convert to bgr
-
-        box_mask = cv2.rectangle(box_mask, top_left, bottom_right, color=color, thickness=thickness)
-
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        label = box['id']
-        box_mask = cv2.putText(box_mask, label, (top_left[0], top_left[1] - 25), font, 1,
-                                                (255,255,255), 2, cv2.LINE_AA)
-        img = cv2.add(img, box_mask)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    return img
