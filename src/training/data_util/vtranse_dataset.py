@@ -164,3 +164,82 @@ class VTranseObjDataset(VTranseDataset):
                                       axis=0)
 
         return uniq_boxes_labels
+
+
+class VTranseRelDataset(VTranseObjDataset):
+    def __init__(self, dataset_path: Path, ds_set="train"):
+        super(VTranseRelDataset, self).__init__(dataset_path, ds_set=ds_set)
+
+    def view_sample(self, idx, rel_idx=0, cmapping='viridis'):
+        image_id = self.ds_idxs[idx]
+        sample = self.samples[image_id]
+
+        sub_box = np.array(sample['sub_boxes'][rel_idx])
+        obj_box = np.array(sample['obj_boxes'][rel_idx])
+        boxes_labels = [sub_box, obj_box]
+
+        sub_label = self.id2obj[sample['rlp_labels'][rel_idx][0]]
+        obj_label = self.id2obj[sample['rlp_labels'][rel_idx][2]]
+        labels = [sub_label, obj_label]
+        rel_label = self.id2predicate[sample['rlp_labels'][rel_idx][1]]
+
+        img = np.array(Image.open(self.dataset_path / "VG_100K" / (image_id + ".jpg")))
+        fig, ax = plt.subplots()
+        ax.imshow(img)
+        cmap = matplotlib.cm.get_cmap(cmapping)
+
+        num_boxes = len(boxes_labels)
+
+        for i, (box_label, name) in enumerate(zip(boxes_labels, labels)):
+            x = box_label[0]
+            y = box_label[1]
+            width = box_label[2] - x
+            height = box_label[3] - y
+            rect = mpatches.Rectangle((x, y), width, height,
+                                      fill=False, linewidth=2, edgecolor=cmap(i/num_boxes))
+            ax.add_patch(rect)
+            plt.text(x, y, name,
+                     bbox=dict(color=cmap(i/num_boxes)))
+        title = f"Bounding Boxes for image {image_id}.jpg. '{rel_label}'"
+        plt.title(title)
+
+    def __getitem__(self, idx):
+        image_id = self.ds_idxs[idx]
+        sample = self.samples[image_id]
+
+        boxes_labels = self._get_unique_boxes(sample)
+
+        img = np.array(Image.open(self.dataset_path / "VG_100K" / (image_id + ".jpg")))
+        labels = boxes_labels[:, -1]
+        boxes = boxes_labels[:, 0:-1]
+
+        rels = zip(sample['sub_boxes'], sample['rlp_labels'], sample['obj_boxes'])
+        rel_labels = []
+        obj_box_masks = []
+        sub_box_masks = []
+        for sub_box, rel, obj_box in rels:
+            rel_labels.append(rel[1])
+
+            obj_box_mask = self._create_box_image(obj_box, img.shape)
+            obj_box_mask = F.to_tensor(obj_box_mask)
+            obj_box_masks.append(obj_box_mask)
+
+            sub_box_mask = self._create_box_image(sub_box, img.shape)
+            sub_box_mask = F.to_tensor(sub_box_mask)
+            sub_box_masks.append(sub_box_mask)
+
+        img = F.to_tensor(img)
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+        labels = torch.as_tensor(labels, dtype=torch.int64)
+        rel_labels = torch.as_tensor(rel_labels, dtype=torch.int64)
+
+        target = {'boxes': boxes,
+                  'labels': labels,
+                  'rel_labels': rel_labels}
+
+        return img, target, obj_box_masks, sub_box_masks
+
+    def _create_box_image(self, box_coords, img_shape) -> np.ndarray:
+        mask = np.zeros(img_shape[0:2], dtype=np.uint8)
+        mask[box_coords[1]:box_coords[3], box_coords[0]:box_coords[2]] = 1
+        return mask

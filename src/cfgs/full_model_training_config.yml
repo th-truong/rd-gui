@@ -1,0 +1,9 @@
+visual_genome_path: D:\datasets\visual_genome
+tensorboard_path: D:\paper_repos\rd-gui\tb_logs\resnet50_frcnn_fpn_lr_restart
+
+optimizer_kwargs:
+    lr: 0.001
+    momentum: 0.9
+    weight_decay: 0.0005
+
+num_epochs: 100
