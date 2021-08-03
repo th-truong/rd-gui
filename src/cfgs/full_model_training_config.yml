@@ -2,7 +2,7 @@ visual_genome_path: D:\datasets\visual_genome
 tensorboard_path: D:\paper_repos\rd-gui\tb_logs\first_rel_model
 
 optimizer_kwargs:
-    lr: 0.0001
+    lr: 0.001
 
 scheduler_kwargs:
     milestones:

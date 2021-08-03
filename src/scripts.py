@@ -65,7 +65,7 @@ def train_model(args, cfg):
     step_count = 0
     for epoch in range(num_epochs):
         print(f"Epoch {epoch}")
-
+        num_correct = 0
         for images, targets in tqdm(torch_ds):
             images = list(image.to(device) for image in images)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
