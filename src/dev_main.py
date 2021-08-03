@@ -49,7 +49,7 @@ if __name__ == "__main__":
     step = 0
     for epoch in range(cfg['num_epochs'].get()):
         print(f"{epoch=}")
-        for _ in torch_ds:
+        for _ in tqdm(torch_ds):
             img, targets, sub_inputs, obj_inputs = _
             img = [x.to(device) for x in img]
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -76,6 +76,10 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 losses.backward()
                 optimizer.step()
+        torch.save({
+                    'model': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    "global_step": step})
         scheduler.step()
 
     # plt.imshow(out[0][0][0].squeeze())
