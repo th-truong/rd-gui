@@ -167,6 +167,8 @@ class VTranseObjDataset(VTranseDataset):
 
 
 class VTranseRelDataset(VTranseObjDataset):
+    # this one loads an image and relationships without processing multi labels for the same sub-obj pair
+    # targets are not one hot encoded
     def __init__(self, dataset_path: Path, ds_set="train"):
         super(VTranseRelDataset, self).__init__(dataset_path, ds_set=ds_set)
 
@@ -237,9 +239,90 @@ class VTranseRelDataset(VTranseObjDataset):
                   'labels': labels,
                   'rel_labels': rel_labels}
 
-        return img, target, obj_box_masks, sub_box_masks
+        return img, target, sub_box_masks, obj_box_masks
 
     def _create_box_image(self, box_coords, img_shape) -> np.ndarray:
         mask = np.zeros(img_shape[0:2], dtype=np.uint8)
-        mask[box_coords[1]:box_coords[3], box_coords[0]:box_coords[2]] = 1
+        mask[box_coords[1]:box_coords[3], box_coords[0]:box_coords[2]] = 255
         return mask
+
+
+class VTranseRelTrainDataset(VTranseRelDataset):
+    # this one loads an image and relationships and processes any multi labels for sub-obj pairs
+    # targets are one hot encoded now because of multi label
+    def __init__(self, dataset_path: Path, ds_set="train"):
+        super(VTranseRelTrainDataset, self).__init__(dataset_path, ds_set=ds_set)
+
+    def __getitem__(self, idx):
+        image_id = self.ds_idxs[idx]
+        sample = self.samples[image_id]
+
+        boxes_labels = self._get_unique_boxes(sample)
+
+        img = np.array(Image.open(self.dataset_path / "VG_100K" / (image_id + ".jpg")))
+        labels = boxes_labels[:, -1]
+        boxes = boxes_labels[:, 0:-1]
+
+        rels = list(zip(sample['sub_boxes'], sample['rlp_labels'], sample['obj_boxes']))
+
+        # need to convert lists to tuples to be able to catch duplicates using set b/c lists arent hashable
+        sub_boxes = [tuple(box) for box in sample['sub_boxes']]
+        obj_boxes = [tuple(box) for box in sample['obj_boxes']]
+        sub_obj_pairs = list(zip(sub_boxes, obj_boxes))
+        duplicates = list([(ele, i) for i, ele in enumerate(sub_obj_pairs)
+                          if sub_obj_pairs.count(ele) > 1])
+        duplicate_indices = [x[1] for x in duplicates]
+        duplicate_sub_obj_pairs = set([x[0] for x in duplicates])
+
+        duplicate_rels = [rels[i] for i in duplicate_indices]
+        rels = [x for x in rels if x not in duplicate_rels]
+        rel_labels = []
+        obj_box_masks = []
+        sub_box_masks = []
+
+        # make all boxes and labels for non-duplicates
+        for sub_box, rel, obj_box in rels:
+            rel_label = np.zeros(100)  # 100 relationship classes
+            rel_label[rel[1]] = 1.
+
+            rel_labels.append(rel_label)
+
+            obj_box_mask = self._create_box_image(obj_box, img.shape)
+            obj_box_mask = F.to_tensor(obj_box_mask)
+            obj_box_masks.append(obj_box_mask)
+
+            sub_box_mask = self._create_box_image(sub_box, img.shape)
+            sub_box_mask = F.to_tensor(sub_box_mask)
+            sub_box_masks.append(sub_box_mask)
+
+        # work through duplicates
+        for sub_box, obj_box in duplicate_sub_obj_pairs:
+            sub_box = list(sub_box)
+            obj_box = list(obj_box)
+
+            obj_box_mask = self._create_box_image(obj_box, img.shape)
+            obj_box_mask = F.to_tensor(obj_box_mask)
+            obj_box_masks.append(obj_box_mask)
+
+            sub_box_mask = self._create_box_image(sub_box, img.shape)
+            sub_box_mask = F.to_tensor(sub_box_mask)
+            sub_box_masks.append(sub_box_mask)
+
+            rel_label = np.zeros(100)  # 100 relationship classes
+
+            for sub_box_dupe, rel, obj_box_dupe in duplicate_rels:
+                if sub_box_dupe == sub_box and obj_box_dupe == obj_box:
+                    rel_label[rel[1]] = 1.
+            # some of the duplicates are duplicated in label too so won't always sum to greater than 1
+            rel_labels.append(rel_label)
+
+        img = F.to_tensor(img)
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+        labels = torch.as_tensor(labels, dtype=torch.int64)
+        rel_labels = torch.as_tensor(rel_labels, dtype=torch.float32)
+
+        target = {'boxes': boxes,
+                  'labels': labels,
+                  'rel_labels': rel_labels}
+
+        return img, target, sub_box_masks, obj_box_masks
