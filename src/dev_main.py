@@ -71,13 +71,15 @@ if __name__ == "__main__":
                 out = model(features, targets, [sub_inputs[0][i]], [obj_inputs[0][i]])
 
                 losses = loss_fn(out.squeeze(), targets[0]['rel_labels'][i])
-                if np.argmax(out.squeeze().cpu().detach().numpy()) == np.argmax(targets[0]['rel_labels'][i].cpu().numpy()):
-                    num_correct += 1
-                step += 1
 
                 optimizer.zero_grad()
                 losses.backward()
                 optimizer.step()
+
+                if np.argmax(out.squeeze().cpu().detach().numpy()) == np.argmax(targets[0]['rel_labels'][i].cpu().numpy()):
+                    num_correct += 1
+                step += 1
+
             writer.add_scalar("num_correct", num_correct, step)
             writer.add_scalar("percentage", num_correct/total_labels, step)
         save_path = Path(cfg['tensorboard_path'].get()) / (str(epoch+1) + "_" + str(step) + "_full_epoch.tar")
