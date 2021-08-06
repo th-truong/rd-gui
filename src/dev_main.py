@@ -17,6 +17,36 @@ def collate_fn(batch):
     return tuple(zip(*batch))
 
 
+def count_relationships():
+    args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
+
+    cfg = confuse.Configuration('RD_GUI', __name__, read=False)
+    cfg.set_file(Path(args.cfg_path))
+
+    dataset_path = Path(cfg['visual_genome_path'].get())
+
+    ds = VTranseRelTrainDataset(dataset_path)
+
+    torch_ds = DataLoader(ds, batch_size=1, shuffle=False, num_workers=4, collate_fn=collate_fn)
+
+    rel_counter = np.zeros(100)
+    for _ in tqdm(torch_ds):
+        img, targets, sub_inputs, obj_inputs = _
+        for i in range(len(targets[0]['rel_labels'])):
+            classes = targets[0]['rel_labels'].numpy()
+            for idx in np.nonzero(classes):
+                rel_counter[idx] += 1
+    return rel_counter
+
+
+def calculate_rel_percentage(rel_id, rel_counter, percentage_count=27174.0):
+    # percentage_count = 27174 is np.median(rel_counter), so 50% of the id's will be subsampled
+    if random.random() < rel_counter[rel_id] / percentage_count:
+        return True
+    else:
+        return False
+
+
 def train_rel_model():
     args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
 
@@ -45,6 +75,8 @@ def train_rel_model():
     log_folder = Path(cfg['tensorboard_path'].get())
     writer = SummaryWriter(log_folder)
 
+    rel_counter = np.load("relationship_counts_train.npy")
+
 
     # 803276 total relationships in trianing set
     step = 0
@@ -71,14 +103,8 @@ def train_rel_model():
                 # hacky subsampling for now...
                 # TODO: calculate proper subsampling or maybe use pos_weights
                 # skip 95% of these classes, imbalance is much worse than that it seems though
-                
-                if (np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 54
-                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 96
-                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 42
-                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 38
-                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 53) and random.random() > 0.05:
-                    pass
-                else:
+                rel_id = np.argmax(targets[0]['rel_labels'][i].cpu().numpy())
+                if calculate_rel_percentage(rel_id=rel_id, rel_counter=rel_counter):
                     # careful with inputs, sub_inputs and obj_inputs should be a list. if slicing remove the parenthesese
                     out = model(features, targets, [sub_inputs[0][i]], [obj_inputs[0][i]])
 
@@ -108,6 +134,9 @@ def train_rel_model():
 
 if __name__ == "__main__":
     train_rel_model()
+
+    # rel_counter = count_relationships()
+
     # args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
 
     # cfg = confuse.Configuration('RD_GUI', __name__, read=False)
