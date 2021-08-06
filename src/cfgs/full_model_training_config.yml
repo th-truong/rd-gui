@@ -6,8 +6,9 @@ optimizer_kwargs:
 
 scheduler_kwargs:
     milestones:
+        - 1
+        - 2
         - 3
-        - 5
     gamma: 0.1
 
 num_epochs: 100
@@ -23,16 +24,16 @@ full_rd_model_kwargs:
     FPN_filters: 256
     soft_attention_filters: 256
     hidden_layer_sizes:
-        - 512
         - 256
-        - 512
+        - 128
+        - 256
     pool_sizes:
-        0: 100
-        1: 50
-        2: 25
-        3: 13
+        0: 50
+        1: 25
+        2: 12
+        3: 12
         pool: 6
-    bottleneck_filters: 64
+    bottleneck_filters: 16
     keys:
         - '0'
         - '1'

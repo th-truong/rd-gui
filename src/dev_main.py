@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import random
 
 from training.rd_model import rd_full_model
 
@@ -37,6 +38,7 @@ def train_rel_model():
     model.to(device)
 
     loss_fn = torch.nn.BCEWithLogitsLoss()
+    loss_fn.to(device)
     optimizer = torch.optim.Adam(model.parameters(), **cfg['optimizer_kwargs'].get())
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, **cfg['scheduler_kwargs'].get())
 
@@ -62,25 +64,36 @@ def train_rel_model():
                     obj_inputs[i][j] = obj_inputs[i][j].to(device)
 
             num_correct = 0
-            total_labels = len(targets[0]['rel_labels'])
+            total_labels = 0
             with torch.no_grad():
                 losses, detections, features = mrcnn_model(img)
             for i in range(len(targets[0]['rel_labels'])):
-                # careful with inputs, sub_inputs and obj_inputs should be a list. if slicing remove the parenthesese
-                out = model(features, targets, [sub_inputs[0][i]], [obj_inputs[0][i]])
+                # hacky subsampling for now...
+                # TODO: calculate proper subsampling or maybe use pos_weights
+                # skip 95% of these classes, imbalance is much worse than that it seems though
+                
+                if (np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 54
+                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 96
+                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 42
+                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 38
+                    or np.argmax(targets[0]['rel_labels'][i].cpu().numpy()) == 53) and random.random() > 0.05:
+                    pass
+                else:
+                    # careful with inputs, sub_inputs and obj_inputs should be a list. if slicing remove the parenthesese
+                    out = model(features, targets, [sub_inputs[0][i]], [obj_inputs[0][i]])
 
-                losses = loss_fn(out.squeeze(), targets[0]['rel_labels'][i])
+                    losses = loss_fn(out.squeeze(), targets[0]['rel_labels'][i])
 
-                optimizer.zero_grad()
-                losses.backward()
-                optimizer.step()
+                    optimizer.zero_grad()
+                    losses.backward()
+                    optimizer.step()
 
-                if np.argmax(out.squeeze().cpu().detach().numpy()) == np.argmax(targets[0]['rel_labels'][i].cpu().numpy()):
-                    num_correct += 1
-                step += 1
-
+                    if np.argmax(out.squeeze().cpu().detach().numpy()) == np.argmax(targets[0]['rel_labels'][i].cpu().numpy()):
+                        num_correct += 1
+                    step += 1
+                    total_labels += 1
             writer.add_scalar("last_prediction", np.argmax(out.squeeze().cpu().detach().numpy()), step)
-            writer.add_scalar("percentage", num_correct/total_labels, step)
+            if total_labels > 0: writer.add_scalar("percentage", num_correct/total_labels, step)
         save_path = Path(cfg['tensorboard_path'].get()) / (str(epoch+1) + "_" + str(step) + "_full_epoch.tar")
         torch.save({
                     'model': model.state_dict(),
