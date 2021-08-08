@@ -41,7 +41,7 @@ def count_relationships():
 
 def calculate_rel_percentage(rel_id, rel_counter, percentage_count=27174.0):
     # percentage_count = 27174 is np.median(rel_counter), so 50% of the id's will be subsampled
-    if random.random() < rel_counter[rel_id] / percentage_count:
+    if random.random() < percentage_count / rel_counter[rel_id]:
         return True
     else:
         return False
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     # mrcnn_model.to(device)
     # model.to(device)
 
-    # saved_model = torch.load(r"D:\paper_repos\rd-gui\src\pretrained_models\first_rel_model\1_660944_full_epoch.tar")
+    # saved_model = torch.load(r"D:\paper_repos\rd-gui\src\pretrained_models\first_rel_model\1_646210_full_epoch.tar")
 
     # model.load_state_dict(saved_model['model'])
     # for _ in tqdm(torch_ds):
