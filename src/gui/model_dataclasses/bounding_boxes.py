@@ -34,7 +34,7 @@ class BoxDetections():
 
     def relations_as_df(self):
         scores = [x['score'] for x in self.relations]
-        relations = [x['person_id'] + " wears " + x['obj_id'] for x in self.relations]
+        relations = [x['person_id'] + f" {x['label']} " + x['obj_id'] for x in self.relations]
         # TODO: fix this when you need to use multiple relationships
         return pd.DataFrame({'Relationship': relations,
                              'Confidence': scores})
@@ -98,13 +98,14 @@ class BoxDetections():
 
                 rel = {"person_id": person,
                        "obj_id": obj,
+                       "label": "wears",
                        "score": vrb_score}
                 relations.append(rel)
         elif model_info['name'] == "vtranse":
             obj_categories = model_info['classes']
             boxes = []
             relations = []
-            pred_boxes = pred[0]
+            pred_boxes = pred[1][0]
             for i, score in enumerate(pred_boxes['scores']):
                 ymin, ymax = pred_boxes['boxes'][i][1], pred_boxes['boxes'][i][3]
                 xmin, xmax = pred_boxes['boxes'][i][0], pred_boxes['boxes'][i][2]

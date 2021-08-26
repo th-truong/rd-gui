@@ -14,6 +14,7 @@ from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
 
 from training.vrb_model import vrb_full_model
 from gui.model_dataclasses import bounding_boxes
+from training.rd_model import rd_full_model
 
 
 QT_IMG_FORMATS = "All files (*.*);;BMP (*.bmp);;CUR (*.cur);;GIF (*.gif);;ICNS (*.icns);;ICO (*.ico);;JPEG (*.jpeg);;JPG (*.jpg);;PBM (*.pbm);;PGM (*.pgm);;PNG (*.png);;PPM (*.ppm);;SVG (*.svg);;SVGZ (*.svgz);;TGA (*.tga);;TIF (*.tif);;TIFF (*.tiff);;WBMP (*.wbmp);;WEBP (*.webp);;XBM (*.xbm);;XPM (*.xpm)"
@@ -34,15 +35,18 @@ def load_model(models_info, name):
         model.load_state_dict(chkpt_full['model'])
         model.eval()
         model.to(device)
+        rd_model = None
     elif name == "vtranse":
-        model = fasterrcnn_resnet50_fpn(pretrained_backbone=True, num_classes=201,
-                                        trainable_backbone_layers=5)
-        model_dict = torch.load(models_info[name]['model_path'])
-        model.load_state_dict(model_dict['model'])
-        model.eval()
+        full_rd_model_kwargs = models_info[name]['full_rd_model_kwargs']
+        rd_model, model = rd_full_model.create_rd_training_models(**full_rd_model_kwargs)
+
+        rd_model_dict = torch.load(models_info[name]['rd_model_path'])
+        rd_model.load_state_dict(rd_model_dict['model'])
+        rd_model.eval()
+        rd_model.to(device)
         model.to(device)
 
-    return model
+    return model, rd_model
 
 
 def load_label_json(json_path):
@@ -59,7 +63,8 @@ class ImageTab(QWidget):
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         models_info = cfg['models'].get()
         self.models = [{'name': name,
-                        'model': load_model(models_info, name),
+                        'model': load_model(models_info, name)[0],
+                        'rd_model': load_model(models_info, name)[1],
                         'classes': load_label_json(models_info[name]['classes']),
                         'relationships': load_label_json(models_info[name]['relationships'])
                         } for name in models_info.keys()]
@@ -140,13 +145,13 @@ class ResultsTab(QWidget):
 
         self.boxes = []
 
-        self.objects_table = PandasQTableModel(obj_df)
         self.objects_view = QTableView()
+        self.objects_table = PandasQTableModel(obj_df, self.objects_view)
         self.objects_view.setModel(self.objects_table)
         self.objects_view.clicked.connect(self.object_clicked)
 
-        self.relations_table = PandasQTableModel(relations_df)
         self.relations_view = QTableView()
+        self.relations_table = PandasQTableModel(relations_df, self.relations_view)
         self.relations_view.setModel(self.relations_table)
         self.relations_view.clicked.connect(self.relation_clicked)
 
@@ -171,8 +176,8 @@ class ResultsTab(QWidget):
         self.parent.update_display_img(bounding_boxes.draw_boxes(img, new_boxes, threshold=0.))
 
     def object_clicked(self, item):
-        idx = item.row()
-        chosen_row = self.boxes[int(idx)]
+        idx = int(item.row())
+        chosen_row = self.boxes[idx]
         # TODO: do this better, don't make a deep copy...
         new_boxes = copy.deepcopy(self.boxes)
         new_boxes.detections = [chosen_row]
@@ -180,17 +185,66 @@ class ResultsTab(QWidget):
         img = self.parent.og_img
         self.parent.update_display_img(bounding_boxes.draw_boxes(img, new_boxes, threshold=0.))
 
+        if self.parent.model['name'] == 'vtranse':
+            import numpy as np
+            from torchvision.transforms import functional as F
+
+            def _create_box_image(box, img_shape) -> np.ndarray:
+                mask = np.zeros(img_shape[0:2], dtype=np.uint8)
+                xmin = int(np.round(box['xmin'].detach().cpu().numpy() * img_shape[1]))
+                xmax = int(np.round(box['xmax'].detach().cpu().numpy() * img_shape[1]))
+                ymin = int(np.round(box['ymin'].detach().cpu().numpy() * img_shape[0]))
+                ymax = int(np.round(box['ymax'].detach().cpu().numpy() * img_shape[0]))
+                mask[ymin:ymax, xmin:xmax] = 255
+                return mask
+
+            box_imgs = []
+            labels = []
+            obj_score = []
+            for box in self.boxes:
+                score = box['score']
+                box_img = _create_box_image(box, self.parent.og_img.shape)
+                box_imgs.append(box_img)
+                labels.append(box['label'])
+                obj_score.append(score)
+            img = F.to_tensor(self.parent.og_img)
+            losses, detections, features = self.parent.model['model']([img.to(self.parent.device)])
+
+            sub = box_imgs[idx]
+            sub = F.to_tensor(sub)
+            relations = []
+
+            rel_thresh = 0.3
+            thresh = 0.3
+            for j, box_img in enumerate(box_imgs):
+                obj = box_img
+                obj = F.to_tensor(obj)
+                out = self.parent.model['rd_model'](features,
+                                                    sub_inputs=[sub.to(self.parent.device)],
+                                                    obj_inputs=[obj.to(self.parent.device)])
+                for k, score in enumerate(out[0].detach().cpu().numpy()):
+                    if score > rel_thresh and obj_score[j] > thresh:
+                        rel = {"person_id": chosen_row['id'],
+                               "obj_id": self.boxes[j]['id'],
+                               "label": self.parent.model['relationships'][k],
+                               "score": score}
+                        relations.append(rel)
+            sorted_relations = sorted(relations, key=lambda k: k['score'], reverse=True)
+            self.boxes.relations = sorted_relations
+            self.relations_table.update_data(self.boxes.relations_as_df())
+
 
 class PandasQTableModel(QAbstractTableModel):
 
-    def __init__(self, data):
+    def __init__(self, data, parent):
         QAbstractTableModel.__init__(self)
+        self.parent = parent
         self._data = data
 
     def rowCount(self, parent=None):
         return self._data.shape[0]
 
-    def columnCount(self, parnet=None):
+    def columnCount(self, parent=None):
         return self._data.shape[1]
 
     def data(self, index, role=Qt.DisplayRole):

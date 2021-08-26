@@ -132,32 +132,65 @@ def train_rel_model():
     #out = model(img)
 
 
-if __name__ == "__main__":
-    train_rel_model()
+def test_image():
+    from PIL import Image
+    from torchvision.transforms import functional as F
+    args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
 
-    # rel_counter = count_relationships()
+    cfg = confuse.Configuration('RD_GUI', __name__, read=False)
+    cfg.set_file(Path(args.cfg_path))
+    dataset_path = Path(cfg['visual_genome_path'].get())
 
-    # args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
+    ds = VTranseRelTrainDataset(dataset_path, ds_set="test")
+    torch_ds = DataLoader(ds, batch_size=1, shuffle=True, num_workers=4, collate_fn=collate_fn)
 
-    # cfg = confuse.Configuration('RD_GUI', __name__, read=False)
-    # cfg.set_file(Path(args.cfg_path))
-    # dataset_path = Path(cfg['visual_genome_path'].get())
+    full_rd_model_kwargs = cfg['full_rd_model_kwargs'].get()
+    model, mrcnn_model = rd_full_model.create_rd_training_models(**full_rd_model_kwargs)
+    model.eval()
+    mrcnn_model.eval()
 
-    # ds = VTranseRelTrainDataset(dataset_path, ds_set="test")
-    # torch_ds = DataLoader(ds, batch_size=1, shuffle=True, num_workers=4, collate_fn=collate_fn)
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    mrcnn_model.to(device)
+    model.to(device)
 
-    # full_rd_model_kwargs = cfg['full_rd_model_kwargs'].get()
-    # model, mrcnn_model = rd_full_model.create_rd_training_models(**full_rd_model_kwargs)
-    # model.eval()
-    # mrcnn_model.eval()
+    saved_model = torch.load(r"D:\paper_repos\rd-gui\src\pretrained_models\first_rel_model\79_8733914_full_epoch.tar")
 
-    # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    # mrcnn_model.to(device)
-    # model.to(device)
+    model.load_state_dict(saved_model['model'])
 
-    # saved_model = torch.load(r"D:\paper_repos\rd-gui\src\pretrained_models\first_rel_model\1_646210_full_epoch.tar")
+    img_path = r"D:\paper_repos\rd-gui\src\142322083_bab79bb28d_o.jpg"
+    img_np = np.array(Image.open(img_path))
+    img = F.to_tensor(img_np)
+    losses, detections, features = mrcnn_model([img.to(device)])
+    detections = detections[0]
+    thresh = 0.0
 
-    # model.load_state_dict(saved_model['model'])
+    def _create_box_image(box_coords, img_shape) -> np.ndarray:
+        mask = np.zeros(img_shape[0:2], dtype=np.uint8)
+        mask[box_coords[1]:box_coords[3], box_coords[0]:box_coords[2]] = 255
+        return mask
+
+    boxes = []
+    labels = []
+    scores = []
+    for i, score in enumerate(detections['scores']):
+        if score > thresh:
+            coords = [int(np.round(x)) for x in detections['boxes'][i].cpu().detach().numpy()]
+            box = _create_box_image(coords, img_np.shape)
+            boxes.append(box)
+            labels.append(ds.id2obj[int(detections['labels'][i].cpu().detach().numpy())])
+            scores.append(detections['scores'][i])
+
+    pair_indices = [3, 6]
+
+    sub = boxes[pair_indices[0]]
+    sub = F.to_tensor(sub)
+    obj = boxes[pair_indices[1]]
+    obj = F.to_tensor(obj)
+
+    out = model(features, sub_inputs=[sub.to(device)], obj_inputs=[obj.to(device)])
+
+    return img_np, boxes, labels, scores, out.cpu().detach().numpy(), ds
+
     # for _ in tqdm(torch_ds):
     #     img, targets, sub_inputs, obj_inputs = _
     #     img = [x.to(device) for x in img]
@@ -184,4 +217,19 @@ if __name__ == "__main__":
     #         print(np.argmax(targets[0]['rel_labels'][i].cpu().numpy()))
     #         print(np.max(targets[0]['rel_labels'][i].cpu().numpy()))
     #         plt.imshow(np.moveaxis(img[0].cpu().squeeze().numpy(), 0, -1))
-    #     break
+    #         break
+
+if __name__ == "__main__":
+    # train_rel_model()
+
+    # rel_counter = count_relationships()
+    img_np, boxes, labels, scores, out, ds = test_image()
+
+    apples = np.argsort(out[0])
+
+    print(ds.id2predicate[int(apples[-1])])
+    print(out[0][apples[-1]])
+    print(ds.id2predicate[int(apples[-2])])
+    print(out[0][apples[-2]])
+    print(ds.id2predicate[int(apples[-3])])
+    print(out[0][apples[-3]])
