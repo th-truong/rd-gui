@@ -3,7 +3,7 @@ from pathlib import Path
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtWidgets import (QFileDialog, QGridLayout, QLabel, QLineEdit,
                              QListWidget, QPushButton, QTabWidget, QWidget,
-                             QTableWidget, QTableView)
+                             QTableWidget, QTableView, QVBoxLayout)
 from PyQt5.QtCore import QAbstractTableModel, Qt
 
 import pandas as pd
@@ -148,15 +148,20 @@ class ResultsTab(QWidget):
         self.objects_view = QTableView()
         self.objects_table = PandasQTableModel(obj_df, self.objects_view)
         self.objects_view.setModel(self.objects_table)
+        self.objects_table.update_data(obj_df)
         self.objects_view.clicked.connect(self.object_clicked)
 
         self.relations_view = QTableView()
         self.relations_table = PandasQTableModel(relations_df, self.relations_view)
         self.relations_view.setModel(self.relations_table)
+        self.relations_table.update_data(relations_df)
         self.relations_view.clicked.connect(self.relation_clicked)
+
+        self.explanation_tab = ExplanationTab(self)
 
         self.tabs.addTab(self.objects_view, "Objects")
         self.tabs.addTab(self.relations_view, "Relations")
+        self.tabs.addTab(self.explanation_tab, "Explanation")
 
         layout = QGridLayout(self)
         layout.addWidget(self.tabs)
@@ -261,3 +266,21 @@ class PandasQTableModel(QAbstractTableModel):
     def update_data(self, data):
         self._data = data
         self.layoutChanged.emit()
+        self.parent.resizeColumnsToContents()
+
+class ExplanationTab(QWidget):
+    def __init__(self, parent):
+        super(QWidget, self).__init__(parent)
+        layout = QVBoxLayout(self)
+        self.setLayout(layout)
+
+        self.explanation_label = QLabel()
+        self.explanation_label.setWordWrap(True)
+        self.explanation_label.setText("Confidence: "
+                                       "A value in [0, 1] that can be interpreted as a"
+                                       " percentage. Indicates how likely the indicated"
+                                       " object class or relationship is correct. \n\n"
+                                       "Risk: A percentage that indicates the likelihood"
+                                       " that the given objects and relationships pose"
+                                       " a safety and security risk.")
+        layout.addWidget(self.explanation_label)
