@@ -1,16 +1,16 @@
-import confuse
-from pathlib import Path
-from argparse import Namespace
-from training.data_util.vtranse_dataset import VTranseDataset, VTranseObjDataset, VTranseRelDataset, VTranseRelTrainDataset
-from matplotlib import pyplot as plt
-from tqdm import tqdm
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-import random
+# import confuse
+# from pathlib import Path
+# from argparse import Namespace
+# from training.data_util.vtranse_dataset import VTranseDataset, VTranseObjDataset, VTranseRelDataset, VTranseRelTrainDataset
+# from matplotlib import pyplot as plt
+# from tqdm import tqdm
+# import numpy as np
+# import torch
+# from torch.utils.data import DataLoader
+# from torch.utils.tensorboard import SummaryWriter
+# import random
 
-from training.rd_model import rd_full_model
+# from training.rd_model import rd_full_model
 
 
 def collate_fn(batch):
@@ -219,17 +219,54 @@ def test_image():
     #         plt.imshow(np.moveaxis(img[0].cpu().squeeze().numpy(), 0, -1))
     #         break
 
+from PIL import Image
+from pathlib import Path
+from tqdm import tqdm
+import imquality.brisque as brisque
+from functools import partial
+from multiprocessing import Pool, Manager
+import json
+
+def calculate_brisque(brisque_score_dict, image_id):
+    img = Image.open(Path(r'D:/datasets/visual_genome') / "VG_100K" / (image_id + ".jpg"))
+    score = brisque.score(img)
+    brisque_score_dict[image_id] = score
+
 if __name__ == "__main__":
+    # for training
     # train_rel_model()
 
+    # for counting rels
     # rel_counter = count_relationships()
-    img_np, boxes, labels, scores, out, ds = test_image()
 
-    apples = np.argsort(out[0])
+    # for testing output of model
+    # img_np, boxes, labels, scores, out, ds = test_image()
 
-    print(ds.id2predicate[int(apples[-1])])
-    print(out[0][apples[-1]])
-    print(ds.id2predicate[int(apples[-2])])
-    print(out[0][apples[-2]])
-    print(ds.id2predicate[int(apples[-3])])
-    print(out[0][apples[-3]])
+    # apples = np.argsort(out[0])
+
+    # print(ds.id2predicate[int(apples[-1])])
+    # print(out[0][apples[-1]])
+    # print(ds.id2predicate[int(apples[-2])])
+    # print(out[0][apples[-2]])
+    # print(ds.id2predicate[int(apples[-3])])
+    # print(out[0][apples[-3]])
+
+
+    with open("image_ids.json", 'r') as f:
+        ds_idxs = json.load(f)
+
+    ds_idxs = ds_idxs
+
+    n_workers = 10
+
+    with Manager() as manager:
+        brisque_score_dict = manager.dict()
+        # make a partial which always feeds the manager dictionary
+        calculate_brisque_partial = partial(calculate_brisque, brisque_score_dict)
+        with Pool(processes=n_workers) as pool:
+            iterators = tqdm(pool.imap(calculate_brisque_partial, ds_idxs), total=len(ds_idxs))
+            # iterate through
+            tuple(iterators)
+
+        with open('brisque_scores.json', 'w') as fp:
+            json.dump(brisque_score_dict.copy(), fp)
