@@ -1,21 +1,5 @@
-# import confuse
-# from pathlib import Path
-# from argparse import Namespace
-# from training.data_util.vtranse_dataset import VTranseDataset, VTranseObjDataset, VTranseRelDataset, VTranseRelTrainDataset
-# from matplotlib import pyplot as plt
-# from tqdm import tqdm
-# import numpy as np
-# import torch
-# from torch.utils.data import DataLoader
-# from torch.utils.tensorboard import SummaryWriter
-# import random
-
-# from training.rd_model import rd_full_model
-
-
 def collate_fn(batch):
     return tuple(zip(*batch))
-
 
 def count_relationships():
     args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
@@ -48,6 +32,19 @@ def calculate_rel_percentage(rel_id, rel_counter, percentage_count=27174.0):
 
 
 def train_rel_model():
+    import confuse
+    from pathlib import Path
+    from argparse import Namespace
+    from training.data_util.vtranse_dataset import VTranseDataset, VTranseObjDataset, VTranseRelDataset, VTranseRelTrainDataset
+    from matplotlib import pyplot as plt
+    from tqdm import tqdm
+    import numpy as np
+    import torch
+    from torch.utils.data import DataLoader
+    from torch.utils.tensorboard import SummaryWriter
+    import random
+
+    from training.rd_model import rd_full_model
     args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
 
     cfg = confuse.Configuration('RD_GUI', __name__, read=False)
@@ -232,26 +229,7 @@ def calculate_brisque(brisque_score_dict, image_id):
     score = brisque.score(img)
     brisque_score_dict[image_id] = score
 
-if __name__ == "__main__":
-    # for training
-    # train_rel_model()
-
-    # for counting rels
-    # rel_counter = count_relationships()
-
-    # for testing output of model
-    # img_np, boxes, labels, scores, out, ds = test_image()
-
-    # apples = np.argsort(out[0])
-
-    # print(ds.id2predicate[int(apples[-1])])
-    # print(out[0][apples[-1]])
-    # print(ds.id2predicate[int(apples[-2])])
-    # print(out[0][apples[-2]])
-    # print(ds.id2predicate[int(apples[-3])])
-    # print(out[0][apples[-3]])
-
-
+def calc_brisque_scores():
     with open("image_ids.json", 'r') as f:
         ds_idxs = json.load(f)
 
@@ -270,3 +248,132 @@ if __name__ == "__main__":
 
         with open('brisque_scores.json', 'w') as fp:
             json.dump(brisque_score_dict.copy(), fp)
+
+    # ['2323812', '2349720', '2405985'] are the broken image ids
+
+def clean_brisque_score():
+    # this one does not have
+    with open("brisque_scores.json", 'r') as fp:
+        brisque_scores = json.load(fp)
+    brisque_scores_cleaned = {}
+    for image_id, score in brisque_scores.items():
+        if score is not None:
+            if 0 <= score <= 100:
+                brisque_scores_cleaned[image_id] = score
+    with open('brisque_scores_cleaned.json', 'w') as fp:
+        json.dump(brisque_scores_cleaned, fp)
+
+
+def analyze_brisque_scores():
+    import numpy as np
+    from matplotlib import pyplot as plt
+    with open("brisque_scores_cleaned.json", 'r') as fp:
+        brisque_scores = json.load(fp)
+    histogram = plt.hist([x for x in brisque_scores.values()], bins=[i for i in range(0, 101, 5)])
+
+    # the final 9 values, 60-100, can be clumped together to make sure each bin has enoughesamples
+    np.sum(histogram[0][-9:])
+
+    histogram_even = plt.hist([x for x in brisque_scores.values()], bins=[i for i in range(0, 61, 5)]+[100])
+
+
+def get_obj_predictions():
+    import sys
+    from pathlib import Path
+    from PyQt5.QtWidgets import QApplication
+    from argparse import Namespace
+    import confuse
+    from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
+    import torchvision
+    import torch
+    from tqdm import tqdm
+    import pickle
+
+    from torch.utils.tensorboard import SummaryWriter
+
+    from gui.main_window import MainWindow
+    from training.data_util.visual_genome_dataset import VGRelationsDataset
+    from training.data_util.vtranse_dataset import VTranseDataset, VTranseObjDataset
+
+    import numpy as np
+    from torchvision.transforms import functional as F
+
+    args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
+
+    cfg = confuse.Configuration('RD_GUI', __name__, read=False)
+    cfg.set_file(Path(args.cfg_path))
+
+    dataset_path = Path(cfg['visual_genome_path'].get())
+
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    model = fasterrcnn_resnet50_fpn(pretrained_backbone=True, num_classes=201,
+                                    trainable_backbone_layers=5)
+    model.to(device)
+    model.eval()
+
+    model_dict = torch.load(r"D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\039resnet50_fpn_frcnn_full.tar")
+    model.load_state_dict(model_dict['model'])
+
+    ds = VTranseObjDataset(dataset_path, ds_set="test")
+    obj_predictions = {image_id: None for image_id in ds.ds_idxs}
+
+    with torch.no_grad():
+        for i, ds_out in tqdm(enumerate(ds), total=len(ds)):
+            image, target = ds_out
+            image_id = ds.ds_idxs[i]
+            images = list([image.to(device)])
+            targets = [{k: v.to(device) for k, v in target.items()}]
+
+            out = model(images, targets)
+
+            boxes = out[0]['boxes'].cpu().detach().numpy().squeeze()
+            scores = out[0]['scores'].cpu().detach().numpy().squeeze()
+            labels = out[0]['labels'].cpu().detach().numpy().squeeze()
+
+            obj_predictions[image_id] = {'boxes': boxes,
+                                         'scores': scores,
+                                         'labels': labels}
+    with open("obj_predictions.p", 'wb') as f:
+        pickle.dump(obj_predictions, f)
+
+
+if __name__ == "__main__":
+    # for training
+    # train_rel_model()
+
+    # for counting rels
+    # rel_counter = count_relationships()
+
+    # for calculating and sving brisque scores
+    # calc_brisque_scores()
+
+    # for testing output of model
+    # img_np, boxes, labels, scores, out, ds = test_image()
+
+    # apples = np.argsort(out[0])
+
+    # print(ds.id2predicate[int(apples[-1])])
+    # print(out[0][apples[-1]])
+    # print(ds.id2predicate[int(apples[-2])])
+    # print(out[0][apples[-2]])
+    # print(ds.id2predicate[int(apples[-3])])
+    # print(out[0][apples[-3]])
+    import enum
+    import pickle
+    import numpy as np
+    import mapcalc
+    from training.data_util.vtranse_dataset import VTranseObjDataset
+    from argparse import Namespace
+    import confuse
+
+    with open("obj_rel_detections/obj_predictions.p", "rb") as f:
+        obj_pred = pickle.load(f)
+
+    args = Namespace(cfg_path='cfgs/full_model_training_config.yml')
+
+    cfg = confuse.Configuration('RD_GUI', __name__, read=False)
+    cfg.set_file(Path(args.cfg_path))
+
+    dataset_path = Path(cfg['visual_genome_path'].get())
+
+    ds = VTranseObjDataset(dataset_path, ds_set="test")

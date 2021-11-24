@@ -5,3 +5,4 @@
 .vscode/launch.json
 
 *.jpg
+src/obj_rel_detections/obj_predictions.p
