@@ -5,4 +5,10 @@
 .vscode/launch.json
 
 *.jpg
+*.jpeg
 src/obj_rel_detections/obj_predictions.p
+src/pyagrum_csv/box_areas_label_brisque.csv
+src/pyagrum_csv/pyagrum_rel_predictions_50.csv
+src/pyagrum_csv/pyagrum_rel_predictions.csv
+src/brisque_scores/class_counts.xlsx
+src/obj_rel_detections/rel_predictions.p

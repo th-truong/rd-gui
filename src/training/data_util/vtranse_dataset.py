@@ -219,8 +219,16 @@ class VTranseRelDataset(VTranseObjDataset):
         rel_labels = []
         obj_box_masks = []
         sub_box_masks = []
+        obj_boxes = []
+        obj_labels = []
+        sub_boxes = []
+        sub_labels = []
         for sub_box, rel, obj_box in rels:
             rel_labels.append(rel[1])
+            sub_labels.append(rel[0])
+            obj_labels.append(rel[2])
+            sub_boxes.append(sub_box)
+            obj_boxes.append(obj_box)
 
             obj_box_mask = self._create_box_image(obj_box, img.shape)
             obj_box_mask = F.to_tensor(obj_box_mask)
@@ -239,7 +247,7 @@ class VTranseRelDataset(VTranseObjDataset):
                   'labels': labels,
                   'rel_labels': rel_labels}
 
-        return img, target, sub_box_masks, obj_box_masks
+        return img, target, sub_box_masks, obj_box_masks, sub_boxes, obj_boxes, sub_labels, obj_labels
 
     def _create_box_image(self, box_coords, img_shape) -> np.ndarray:
         mask = np.zeros(img_shape[0:2], dtype=np.uint8)
