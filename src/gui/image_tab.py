@@ -1,20 +1,25 @@
+import copy
+import json
 from pathlib import Path
 
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtWidgets import (QFileDialog, QGridLayout, QLabel, QLineEdit,
-                             QListWidget, QPushButton, QTabWidget, QWidget,
-                             QTableWidget, QTableView, QVBoxLayout)
-from PyQt5.QtCore import QAbstractTableModel, Qt
-
+import imquality.brisque as brisque
+import numpy as np
 import pandas as pd
-import copy
+import pyAgrum as gum
+import pyAgrum.lib.notebook as gnb
+import pyAgrum.lib.image as gumimage
 import torch
-import json
+from PIL import Image
+from PyQt5.QtCore import QAbstractTableModel, Qt
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import (QFileDialog, QGridLayout, QLabel, QLineEdit,
+                             QListWidget, QPushButton, QSizePolicy, QTableView,
+                             QTableWidget, QTabWidget, QVBoxLayout, QWidget)
 from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
-
-from training.vrb_model import vrb_full_model
-from gui.model_dataclasses import bounding_boxes
 from training.rd_model import rd_full_model
+from training.vrb_model import vrb_full_model
+
+from gui.model_dataclasses import bounding_boxes
 
 
 QT_IMG_FORMATS = "All files (*.*);;BMP (*.bmp);;CUR (*.cur);;GIF (*.gif);;ICNS (*.icns);;ICO (*.ico);;JPEG (*.jpeg);;JPG (*.jpg);;PBM (*.pbm);;PGM (*.pgm);;PNG (*.png);;PPM (*.ppm);;SVG (*.svg);;SVGZ (*.svgz);;TGA (*.tga);;TIF (*.tif);;TIFF (*.tiff);;WBMP (*.wbmp);;WEBP (*.webp);;XBM (*.xbm);;XPM (*.xpm)"
@@ -70,6 +75,8 @@ class ImageTab(QWidget):
                         } for name in models_info.keys()]
         self.model = self.models[0]
 
+        self.bayes_net = self.create_bn()
+
         layout = QGridLayout(self)
         self.setLayout(layout)
 
@@ -100,6 +107,23 @@ class ImageTab(QWidget):
         layout.addWidget(self.model_listbox, 4, 8, 4, 7)
         for i, model in enumerate(self.models):
             self.model_listbox.insertItem(i, model['name'])
+
+    @staticmethod
+    def create_bn():
+        bn = gum.BayesNet("Probability of Error")
+        sub_box_area_node = gum.LabelizedVariable('sub_box_area', 'Area of subject box', ['small', 'medium', 'large'])
+        obj_box_area_node = gum.LabelizedVariable('obj_box_area', 'Area of object box', ['small', 'medium', 'large'])
+
+        brisque_score_node = gum.LabelizedVariable('brisque_score', 'BRISQUE Score calculated for the image.', ['Very Good', 'Good', 'Bad', 'Very Bad'])
+
+        pred_error_node = gum.LabelizedVariable('pred_error', 'Probability of Error', ['True', 'False'])
+        child_node = bn.add(pred_error_node)
+        parent_nodes = [bn.add(node) for node in [sub_box_area_node, obj_box_area_node, brisque_score_node]]
+        for node in parent_nodes:
+            bn.addArc(node, child_node)
+        learner = gum.BNLearner(r"pyagrum_csv\box_areas_label_brisque.csv", bn)
+        bn = learner.learnParameters(bn.dag())
+        return bn
 
     def open_file_btn_click(self):
         # get file path
@@ -159,9 +183,12 @@ class ResultsTab(QWidget):
 
         self.explanation_tab = ExplanationTab(self)
 
+        self.definitions_tab = DefinitionsTab(self)
+
         self.tabs.addTab(self.objects_view, "Objects")
         self.tabs.addTab(self.relations_view, "Relations")
         self.tabs.addTab(self.explanation_tab, "Explanation")
+        self.tabs.addTab(self.definitions_tab, "Definitions")
 
         layout = QGridLayout(self)
         layout.addWidget(self.tabs)
@@ -177,8 +204,71 @@ class ResultsTab(QWidget):
         new_boxes = copy.deepcopy(self.boxes)
         new_boxes.detections = boxes
 
+        width = self.boxes.width
+        height = self.boxes.height
+
+        person_box = person_box[0]
+        obj_box = obj_box[0]
+
         img = self.parent.og_img
         self.parent.update_display_img(bounding_boxes.draw_boxes(img, new_boxes, threshold=0.))
+
+        error_prob = self.get_error_prob(img, person_box, obj_box, width, height)
+
+    def get_error_prob(self, img, person_box, obj_box, width, height):
+        person_area = self._get_obj_area(person_box['xmin'], person_box['ymin'], person_box['xmax'], person_box['ymax'], width, height)
+        obj_area = self._get_obj_area(obj_box['xmin'], obj_box['ymin'], obj_box['xmax'], obj_box['ymax'], width, height)
+        score = brisque.score(img)
+
+        evidence_dict = {"obj_box_area": self.bin_areas(obj_area),
+                         "sub_box_area": self.bin_areas(person_area),
+                         "brisque_score": self.bin_brisque(score)}
+
+        lazy_prop_bn = gum.LazyPropagation(self.parent.bayes_net)
+        lazy_prop_bn.setEvidence(evidence_dict)
+        lazy_prop_bn.makeInference()
+        error_prob = lazy_prop_bn.posterior("pred_error").toarray()
+
+        self.save_bayes_posterior(self.parent.bayes_net, evidence_dict)
+        self.explanation_tab.update_bayes_img()
+
+        return error_prob
+
+    @staticmethod
+    def save_bayes_posterior(bayes_net, evidence,
+                             path=Path(r"gui/pyagrum_dumps/test_export.png")):
+        gumimage.exportInference(bayes_net,
+                                 str(path),
+                                 evs=evidence,
+                                 size="9!")
+
+    @staticmethod
+    def bin_areas(area):
+        if area < 32. ** 2:
+            size = 'small'
+        elif 32. ** 2 <= area <= 64. ** 2:
+            size = 'medium'
+        elif 64. ** 2 < area:
+            size = 'large'
+        return size
+
+    @staticmethod
+    def bin_brisque(brisque_score):
+        if 0 <= brisque_score < 10:
+            quality = 'Very Good'
+        elif 10 <= brisque_score < 20:
+            quality = 'Good'
+        elif 20 <= brisque_score < 30:
+            quality = 'Bad'
+        elif 30 <= brisque_score:
+            quality = 'Very Bad'
+        else:
+            quality = np.nan
+        return quality
+
+    @staticmethod
+    def _get_obj_area(xmin, ymin, xmax, ymax, width, height):
+        return float((xmax - xmin) * width * (ymax - ymin) * height)
 
     def object_clicked(self, item):
         idx = int(item.row())
@@ -268,7 +358,46 @@ class PandasQTableModel(QAbstractTableModel):
         self.layoutChanged.emit()
         self.parent.resizeColumnsToContents()
 
+
 class ExplanationTab(QWidget):
+    def __init__(self, parent):
+        super(QWidget, self).__init__(parent)
+        layout = QVBoxLayout(self)
+        self.setLayout(layout)
+
+        self.pyagrum_display = QLabel(self)
+
+        test_img_path = r"gui\pyagrum_dumps\test_export.png"
+        img = Image.open(test_img_path)
+        img = np.array(img)
+
+        layout.addWidget(self.pyagrum_display)
+        self.pyagrum_display.show()
+        h, w, ch = img.shape
+        bytes_per_line = ch * w
+        Qimg_obj = QImage(img, w, h, bytes_per_line,
+                          QImage.Format_RGBA8888)
+        self.pyagrum_display.setPixmap(QPixmap(Qimg_obj))
+        self.pyagrum_display.setScaledContents(True)
+
+        self.explanation_label = QLabel()
+        self.explanation_label.setWordWrap(True)
+        self.explanation_label.setText(r"person_1 (86% confidence) is found to be wearing hat_2 (85% confidence). There is low risk of a mistake for the given image and object detections.")
+        layout.addWidget(self.explanation_label)
+
+    def update_bayes_img(self):
+        test_img_path = r"gui\pyagrum_dumps\test_export.png"
+        img = Image.open(test_img_path)
+        img = np.array(img)
+        h, w, ch = img.shape
+        bytes_per_line = ch * w
+        Qimg_obj = QImage(img, w, h, bytes_per_line,
+                          QImage.Format_RGBA8888)
+        self.pyagrum_display.setPixmap(QPixmap(Qimg_obj))
+        self.pyagrum_display.setScaledContents(True)
+
+
+class DefinitionsTab(QWidget):
     def __init__(self, parent):
         super(QWidget, self).__init__(parent)
         layout = QVBoxLayout(self)

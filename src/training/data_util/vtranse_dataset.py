@@ -20,7 +20,7 @@ class VTranseDataset(Dataset):
         self.ds_set = ds_set
         self._prepare_labels(metadata_path)
 
-        ds_set_path = dataset_path /  ("vtranse_" + ds_set + "_labels.pkl")
+        ds_set_path = dataset_path / ("vtranse_" + ds_set + "_labels.pkl")
         with open(ds_set_path, "rb") as f:
             self.samples = pickle.load(f)
         self.dataset_path = dataset_path

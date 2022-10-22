@@ -1,17 +1,17 @@
-imgs_folder: D:\paper_repos\rd-gui\src
+imgs_folder: ROOT_PATH\src
 
 models:
   relatable_clothing:
-    model_path: D:\paper_repos\rd-gui\src\pretrained_models\optimal_model\optimal_model.tar
-    classes: D:\paper_repos\rd-gui\src\pretrained_models\optimal_model\objects_list.json
-    relationships: D:\paper_repos\rd-gui\src\pretrained_models\optimal_model\pred_list.json
+    model_path: ROOT_PATH\src\pretrained_models\optimal_model\optimal_model.tar
+    classes: ROOT_PATH\src\pretrained_models\optimal_model\objects_list.json
+    relationships: ROOT_PATH\src\pretrained_models\optimal_model\pred_list.json
   vtranse:
-    model_path: D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\39_4312581_full_epoch.tar
-    rd_model_path: D:\paper_repos\rd-gui\src\pretrained_models\first_rel_model\39_4312581_full_epoch.tar
-    classes:  D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\objects_list.json
-    relationships: D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\pred_list.json
+    model_path: ROOT_PATH\src\pretrained_models\frcnn_vtranse\39_4312581_full_epoch.tar
+    rd_model_path: ROOT_PATH\src\pretrained_models\first_rel_model\39_4312581_full_epoch.tar
+    classes:  ROOT_PATH\src\pretrained_models\frcnn_vtranse\objects_list.json
+    relationships: ROOT_PATH\src\pretrained_models\frcnn_vtranse\pred_list.json
     full_rd_model_kwargs:
-        mrcnn_model_path: D:\paper_repos\rd-gui\src\pretrained_models\frcnn_vtranse\039resnet50_fpn_frcnn_full.tar
+        mrcnn_model_path: ROOT_PATH\src\pretrained_models\frcnn_vtranse\039resnet50_fpn_frcnn_full.tar
         min_size: 800
         max_size: 1333
         mask_mold_filters: 8

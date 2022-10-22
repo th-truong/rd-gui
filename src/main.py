@@ -5,15 +5,6 @@ from scripts import display_gui, train_model
 
 
 if __name__ == "__main__":
-    # ideas for functionality:
-    # 5. display of number of people in image, if they are wearing helmets, etc. -- add summary of things in image
-    # 4. add a basic risk analysis that combines model confidence + dangerous objects being detected
-    # 3. relationship tree -> select a person and a tree pops up with all relationships
-    # 2. identifying with hand is holding the objects
-    # 1. user parameters for choosing certain parameters on plots, risk of error, etc.
-
-    # make up risk = probability * cost, make up cost for now (in dollars, or human lives, etc.)
-    # represent it simply as a colour gradient
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 

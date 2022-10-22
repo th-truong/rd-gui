@@ -5,6 +5,7 @@ from gui.image_tab import ImageTab
 
 import pandas as pd
 
+
 class MainWindow(QMainWindow):
     def __init__(self, cfg):
         super().__init__()
